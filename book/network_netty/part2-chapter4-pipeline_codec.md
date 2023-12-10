@@ -120,28 +120,8 @@ flowchart TD
 
 네티는 인바운드 이벤트를 ChannelInboundHandler 인터페이스로 제공
 
-```mermaid
-flowchart TD
-    CL[클라이언트]
-
-    CL -- 데이터 전송 --> SC
-
-    SC[소켓 채널]
-    CP[\채널 파이프라인\]
-    IEH[인바운드 이벤트 핸들러]
-    EEC[이벤트 처리 코드]
-
-    SC -- 데이터 수신 이벤트 --> CP
-    CP ----> IEH
-    IEH ----> EEC
-
-    subgraph Netty_Server
-        SC
-        CP
-        IEH
-        EEC
-    end
-```
+<details>
+<summary>ChannelInboundHandler</summary>
 
 ```java
 package io.netty.channel;
@@ -204,6 +184,31 @@ public interface ChannelInboundHandler extends ChannelHandler {
     @SuppressWarnings("deprecation")
     void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) throws Exception;
 }
+```
+
+</details>
+
+```mermaid
+flowchart TD
+    CL[클라이언트]
+
+    CL -- 데이터 전송 --> SC
+
+    SC[소켓 채널]
+    CP[\채널 파이프라인\]
+    IEH[인바운드 이벤트 핸들러]
+    EEC[이벤트 처리 코드]
+
+    SC -- 데이터 수신 이벤트 --> CP
+    CP ----> IEH
+    IEH ----> EEC
+
+    subgraph Netty_Server
+        SC
+        CP
+        IEH
+        EEC
+    end
 ```
 
 클라이언트 접속, 데이터 전송, 연결 종료시 이벤트 흐름
@@ -289,3 +294,527 @@ CIA --> CURG
 6. ChannelUnregistered
     - 채널이 이벤트 루프에서 제거되었을 때 발생
     - 해당 이벤트 이후에는 채널에서 발생한 이벤트를 처리할 수 없다
+
+### 4.3.2 채널 아웃바운드 이벤트
+
+네티는 아웃바운드 이벤트를 ChannelOutboundHandler 인터페이스로 제공  
+또한 모든 ChannelOutboundHandler 이벤트는 ChannelHandlerContext 객체를 인수로 받음  
+
+ChannelHandlerContext는 두 가지 네티 객체에 대한 상호작용을 도와주는 인터페이스
+
+1. 채널에 대한 입출력 처리
+   - ex) writeAndFlush 메서드로 채널에 데이터를 기록, close 메서드로 채널의 연결을 종료할 수 있다
+
+2. 채널 파이프라인에 대한 상호작용
+   - 사용자에 의한 이벤트 발생과 채널 파이프라인에 등록된 이벤트 핸들러의 동적 변경
+      - ChannelHandlerContext fireExceptionCaught 메서드를 호출하면 채널 파이프라인으로 exceptionCaught 이벤트가 전달되고 해당 이벤트 메서드가 수행
+      - 채널이 초기화될 때 설정된 채널 파이프라인을 가져오는 메서드를 제공, 그러므로 ChannelHandlerContext를 통해서 설정된 채널 파이프라인을 수정할 수 있다
+
+<details>
+<summary>ChannelOutboundHandler</summary>
+
+```java
+package io.netty.channel;
+
+import java.net.SocketAddress;
+
+/**
+ * {@link ChannelHandler} which will get notified for IO-outbound-operations.
+ */
+public interface ChannelOutboundHandler extends ChannelHandler {
+    /**
+     * Called once a bind operation is made.
+     *
+     * @param ctx           the {@link ChannelHandlerContext} for which the bind operation is made
+     * @param localAddress  the {@link SocketAddress} to which it should bound
+     * @param promise       the {@link ChannelPromise} to notify once the operation completes
+     * @throws Exception    thrown if an error occurs
+     */
+    void bind(ChannelHandlerContext ctx, SocketAddress localAddress, ChannelPromise promise) throws Exception;
+
+    /**
+     * Called once a connect operation is made.
+     *
+     * @param ctx               the {@link ChannelHandlerContext} for which the connect operation is made
+     * @param remoteAddress     the {@link SocketAddress} to which it should connect
+     * @param localAddress      the {@link SocketAddress} which is used as source on connect
+     * @param promise           the {@link ChannelPromise} to notify once the operation completes
+     * @throws Exception        thrown if an error occurs
+     */
+    void connect(
+            ChannelHandlerContext ctx, SocketAddress remoteAddress,
+            SocketAddress localAddress, ChannelPromise promise) throws Exception;
+
+    /**
+     * Called once a disconnect operation is made.
+     *
+     * @param ctx               the {@link ChannelHandlerContext} for which the disconnect operation is made
+     * @param promise           the {@link ChannelPromise} to notify once the operation completes
+     * @throws Exception        thrown if an error occurs
+     */
+    void disconnect(ChannelHandlerContext ctx, ChannelPromise promise) throws Exception;
+
+    /**
+     * Called once a close operation is made.
+     *
+     * @param ctx               the {@link ChannelHandlerContext} for which the close operation is made
+     * @param promise           the {@link ChannelPromise} to notify once the operation completes
+     * @throws Exception        thrown if an error occurs
+     */
+    void close(ChannelHandlerContext ctx, ChannelPromise promise) throws Exception;
+
+    /**
+     * Called once a deregister operation is made from the current registered {@link EventLoop}.
+     *
+     * @param ctx               the {@link ChannelHandlerContext} for which the close operation is made
+     * @param promise           the {@link ChannelPromise} to notify once the operation completes
+     * @throws Exception        thrown if an error occurs
+     */
+    void deregister(ChannelHandlerContext ctx, ChannelPromise promise) throws Exception;
+
+    /**
+     * Intercepts {@link ChannelHandlerContext#read()}.
+     */
+    void read(ChannelHandlerContext ctx) throws Exception;
+
+    /**
+    * Called once a write operation is made. The write operation will write the messages through the
+     * {@link ChannelPipeline}. Those are then ready to be flushed to the actual {@link Channel} once
+     * {@link Channel#flush()} is called
+     *
+     * @param ctx               the {@link ChannelHandlerContext} for which the write operation is made
+     * @param msg               the message to write
+     * @param promise           the {@link ChannelPromise} to notify once the operation completes
+     * @throws Exception        thrown if an error occurs
+     */
+    void write(ChannelHandlerContext ctx, Object msg, ChannelPromise promise) throws Exception;
+
+    /**
+     * Called once a flush operation is made. The flush operation will try to flush out all previous written messages
+     * that are pending.
+     *
+     * @param ctx               the {@link ChannelHandlerContext} for which the flush operation is made
+     * @throws Exception        thrown if an error occurs
+     */
+    void flush(ChannelHandlerContext ctx) throws Exception;
+}
+```
+
+</details>
+
+<details>
+<summary>ChannelHandlerContext</summary>
+
+```java
+package io.netty.channel;
+
+import io.netty.buffer.ByteBuf;
+import io.netty.buffer.ByteBufAllocator;
+import io.netty.util.Attribute;
+import io.netty.util.AttributeKey;
+import io.netty.util.AttributeMap;
+import io.netty.util.concurrent.EventExecutor;
+
+/**
+ * Enables a {@link ChannelHandler} to interact with its {@link ChannelPipeline}
+ * and other handlers. Among other things a handler can notify the next {@link ChannelHandler} in the
+ * {@link ChannelPipeline} as well as modify the {@link ChannelPipeline} it belongs to dynamically.
+ *
+ * <h3>Notify</h3>
+ *
+ * You can notify the closest handler in the same {@link ChannelPipeline} by calling one of the various methods
+ * provided here.
+ *
+ * Please refer to {@link ChannelPipeline} to understand how an event flows.
+ *
+ * <h3>Modifying a pipeline</h3>
+ *
+ * You can get the {@link ChannelPipeline} your handler belongs to by calling
+ * {@link #pipeline()}.  A non-trivial application could insert, remove, or
+ * replace handlers in the pipeline dynamically at runtime.
+ *
+ * <h3>Retrieving for later use</h3>
+ *
+ * You can keep the {@link ChannelHandlerContext} for later use, such as
+ * triggering an event outside the handler methods, even from a different thread.
+ * <pre>
+ * public class MyHandler extends {@link ChannelDuplexHandler} {
+ *
+ *     <b>private {@link ChannelHandlerContext} ctx;</b>
+ *
+ *     public void beforeAdd({@link ChannelHandlerContext} ctx) {
+ *         <b>this.ctx = ctx;</b>
+ *     }
+ *
+ *     public void login(String username, password) {
+ *         ctx.write(new LoginMessage(username, password));
+ *     }
+ *     ...
+ * }
+ * </pre>
+ *
+ * <h3>Storing stateful information</h3>
+ *
+ * {@link #attr(AttributeKey)} allow you to
+ * store and access stateful information that is related with a {@link ChannelHandler} / {@link Channel} and its
+ * context. Please refer to {@link ChannelHandler} to learn various recommended
+ * ways to manage stateful information.
+ *
+ * <h3>A handler can have more than one {@link ChannelHandlerContext}</h3>
+ *
+ * Please note that a {@link ChannelHandler} instance can be added to more than
+ * one {@link ChannelPipeline}.  It means a single {@link ChannelHandler}
+ * instance can have more than one {@link ChannelHandlerContext} and therefore
+ * the single instance can be invoked with different
+ * {@link ChannelHandlerContext}s if it is added to one or more {@link ChannelPipeline}s more than once.
+ * Also note that a {@link ChannelHandler} that is supposed to be added to multiple {@link ChannelPipeline}s should
+ * be marked as {@link io.netty.channel.ChannelHandler.Sharable}.
+ *
+ * <h3>Additional resources worth reading</h3>
+ * <p>
+ * Please refer to the {@link ChannelHandler}, and
+ * {@link ChannelPipeline} to find out more about inbound and outbound operations,
+ * what fundamental differences they have, how they flow in a  pipeline,  and how to handle
+ * the operation in your application.
+ */
+public interface ChannelHandlerContext extends AttributeMap, ChannelInboundInvoker, ChannelOutboundInvoker {
+
+    /**
+     * Return the {@link Channel} which is bound to the {@link ChannelHandlerContext}.
+     */
+    Channel channel();
+
+    /**
+     * Returns the {@link EventExecutor} which is used to execute an arbitrary task.
+     */
+    EventExecutor executor();
+
+    /**
+     * The unique name of the {@link ChannelHandlerContext}.The name was used when then {@link ChannelHandler}
+     * was added to the {@link ChannelPipeline}. This name can also be used to access the registered
+     * {@link ChannelHandler} from the {@link ChannelPipeline}.
+     */
+    String name();
+
+    /**
+     * The {@link ChannelHandler} that is bound this {@link ChannelHandlerContext}.
+     */
+    ChannelHandler handler();
+
+    /**
+     * Return {@code true} if the {@link ChannelHandler} which belongs to this context was removed
+     * from the {@link ChannelPipeline}. Note that this method is only meant to be called from with in the
+     * {@link EventLoop}.
+     */
+    boolean isRemoved();
+
+    @Override
+    ChannelHandlerContext fireChannelRegistered();
+
+    @Override
+    ChannelHandlerContext fireChannelUnregistered();
+
+    @Override
+    ChannelHandlerContext fireChannelActive();
+
+    @Override
+    ChannelHandlerContext fireChannelInactive();
+
+    @Override
+    ChannelHandlerContext fireExceptionCaught(Throwable cause);
+
+    @Override
+    ChannelHandlerContext fireUserEventTriggered(Object evt);
+
+    @Override
+    ChannelHandlerContext fireChannelRead(Object msg);
+
+    @Override
+    ChannelHandlerContext fireChannelReadComplete();
+
+    @Override
+    ChannelHandlerContext fireChannelWritabilityChanged();
+
+    @Override
+    ChannelHandlerContext read();
+
+    @Override
+    ChannelHandlerContext flush();
+
+    /**
+     * Return the assigned {@link ChannelPipeline}
+     */
+    ChannelPipeline pipeline();
+
+    /**
+     * Return the assigned {@link ByteBufAllocator} which will be used to allocate {@link ByteBuf}s.
+     */
+    ByteBufAllocator alloc();
+
+    /**
+     * @deprecated Use {@link Channel#attr(AttributeKey)}
+     */
+    @Deprecated
+    @Override
+    <T> Attribute<T> attr(AttributeKey<T> key);
+
+    /**
+     * @deprecated Use {@link Channel#hasAttr(AttributeKey)}
+     */
+    @Deprecated
+    @Override
+    <T> boolean hasAttr(AttributeKey<T> key);
+}
+```
+
+</details>
+
+1. bind 이벤트
+   - 서버 소켓 채널이 클라이언트의 연결을 대기하는 IP와 포트가 설정되었을 때 발생
+   - 서버 소켓 채널이 사용 중인 SocketAddress 객체가 인수로 입력됨
+2. connect 이벤트
+   - 클라이언트 소켓 채널이 서버에 연결되었을 때 발생
+   - 원격지 SocketAddress 정보와 로컬 SocketAddress 정보가 인수로 입력됨
+3. disconnect 이벤트
+   - 클라이언트 소켓 채널의 연결이 끊어졌을 때 발생
+4. close 이벤트
+   - 클라이언트 소켓 채널의 연결이 닫혔을 때 발생
+5. write 이벤트
+   - 소켓 채널에 데이터가 기록되었을 때 발생
+   - 소켓 채널에 기록된 데이터 버퍼가 인수로 입력됨
+6. flush 이벤트
+   - 소켓 채널에 대한 flush 메서드가 호출되었을 때 발생
+
+### 4.3.3 이벤트 이동 경로와 이벤트 메서드 실행
+
+
+
+<details>
+<summary>여러개의 이벤트 핸들러가 등록되어 있을 때 이벤트에 해당하는 이벤트 메서드가 실행된다</summary>
+
+```java
+package com.github.nettybook.ch4;
+
+import io.netty.bootstrap.ServerBootstrap;
+import io.netty.channel.ChannelFuture;
+import io.netty.channel.ChannelInitializer;
+import io.netty.channel.ChannelPipeline;
+import io.netty.channel.EventLoopGroup;
+import io.netty.channel.nio.NioEventLoopGroup;
+import io.netty.channel.socket.SocketChannel;
+import io.netty.channel.socket.nio.NioServerSocketChannel;
+
+public class EchoServerV3 {
+    public static void main(String[] args) throws Exception {
+        EventLoopGroup bossGroup = new NioEventLoopGroup(1);
+        EventLoopGroup workerGroup = new NioEventLoopGroup();
+        try {
+            ServerBootstrap b = new ServerBootstrap();
+            b.group(bossGroup, workerGroup)
+             .channel(NioServerSocketChannel.class)
+             .childHandler(new ChannelInitializer<SocketChannel>() {
+                @Override
+                public void initChannel(SocketChannel ch) {
+                    ChannelPipeline p = ch.pipeline();
+                    p.addLast(new EchoServerV3FirstHandler());
+                    p.addLast(new EchoServerV3SecondHandler());
+                }
+            });
+
+            ChannelFuture f = b.bind(8888).sync();
+            f.channel().closeFuture().sync();
+        }
+        finally {
+            workerGroup.shutdownGracefully();
+            bossGroup.shutdownGracefully();
+        }
+    }
+}
+```
+
+```java
+package com.github.nettybook.ch4;
+
+import java.nio.charset.Charset;
+
+import io.netty.buffer.ByteBuf;
+import io.netty.channel.ChannelHandlerContext;
+import io.netty.channel.ChannelInboundHandlerAdapter;
+
+/**
+ * Handler implementation for the echo server.
+ */
+public class EchoServerV3FirstHandler extends ChannelInboundHandlerAdapter {
+    @Override
+    public void channelRead(ChannelHandlerContext ctx, Object msg) {
+        ByteBuf readMessage = (ByteBuf) msg;
+        System.out.println("channelRead : " + readMessage.toString(Charset.defaultCharset()));
+        ctx.write(msg);
+    }
+}
+```
+
+```java
+package com.github.nettybook.ch4;
+
+import io.netty.channel.ChannelHandlerContext;
+import io.netty.channel.ChannelInboundHandlerAdapter;
+
+/**
+ * Handler implementation for the echo server.
+ */
+public class EchoServerV3SecondHandler extends ChannelInboundHandlerAdapter {
+    @Override
+    public void channelReadComplete(ChannelHandlerContext ctx) {
+        System.out.println("channelReadComplete 발생");
+        ctx.flush();
+    }
+
+    @Override
+    public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) {
+        cause.printStackTrace();
+        ctx.close();
+    }
+}
+```
+
+</details>
+
+<details>
+<summary>하나의 이벤트는 하나의 이벤트 메서드만 수행한다</summary>
+
+```java
+package com.github.nettybook.ch4;
+
+import io.netty.bootstrap.ServerBootstrap;
+import io.netty.channel.ChannelFuture;
+import io.netty.channel.ChannelInitializer;
+import io.netty.channel.ChannelPipeline;
+import io.netty.channel.EventLoopGroup;
+import io.netty.channel.nio.NioEventLoopGroup;
+import io.netty.channel.socket.SocketChannel;
+import io.netty.channel.socket.nio.NioServerSocketChannel;
+
+public class EchoServerV4 {
+    public static void main(String[] args) throws Exception {
+        EventLoopGroup bossGroup = new NioEventLoopGroup(1);
+        EventLoopGroup workerGroup = new NioEventLoopGroup();
+        try {
+            ServerBootstrap b = new ServerBootstrap();
+            b.group(bossGroup, workerGroup)
+             .channel(NioServerSocketChannel.class)
+             .childHandler(new ChannelInitializer<SocketChannel>() {
+                @Override
+                public void initChannel(SocketChannel ch) {
+                    ChannelPipeline p = ch.pipeline();
+                    p.addLast(new EchoServerV4FirstHandler());
+                    p.addLast(new EchoServerV4SecondHandler());
+                }
+            });
+
+            ChannelFuture f = b.bind(8888).sync();
+            f.channel().closeFuture().sync();
+        }
+        finally {
+            workerGroup.shutdownGracefully();
+            bossGroup.shutdownGracefully();
+        }
+    }
+}
+```
+
+```java
+package com.github.nettybook.ch4;
+
+import java.nio.charset.Charset;
+
+import io.netty.buffer.ByteBuf;
+import io.netty.channel.ChannelHandlerContext;
+import io.netty.channel.ChannelInboundHandlerAdapter;
+
+/**
+ * Handler implementation for the echo server.
+ */
+public class EchoServerV4FirstHandler extends ChannelInboundHandlerAdapter {
+    @Override
+    public void channelRead(ChannelHandlerContext ctx, Object msg) {
+        ByteBuf readMessage = (ByteBuf) msg;
+        System.out.println("FirstHandler channelRead : " + readMessage.toString(Charset.defaultCharset()));
+        ctx.write(msg);
+        ctx.fireChannelRead(msg);
+    }
+}
+```
+
+```java
+package com.github.nettybook.ch4;
+
+import java.nio.charset.Charset;
+
+import io.netty.buffer.ByteBuf;
+import io.netty.channel.ChannelHandlerContext;
+import io.netty.channel.ChannelInboundHandlerAdapter;
+
+/**
+ * Handler implementation for the echo server.
+ */
+public class EchoServerV4SecondHandler extends ChannelInboundHandlerAdapter {
+    @Override
+    public void channelRead(ChannelHandlerContext ctx, Object msg) {
+        ByteBuf readMessage = (ByteBuf) msg;
+        System.out.println("SecondHandler channelRead : " + readMessage.toString(Charset.defaultCharset()));
+    }
+    
+    @Override
+    public void channelReadComplete(ChannelHandlerContext ctx) {
+        System.out.println("channelReadComplete 발생");
+        ctx.flush();
+    }
+
+    @Override
+    public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) {
+        cause.printStackTrace();
+        ctx.close();
+    }
+}
+```
+
+```log
+FirstHandler channelRead: a
+channelReadComplete 발생
+FirstHandler channelRead: s
+channelReadComplete 발생
+FirstHandler channelRead: d
+channelReadComplete 발생
+FirstHandler channelRead: f
+channelReadComplete 발생
+```
+
+만약 두 번째 이벤트 핸들러의 channelRead 메서드도 수행하고 싶다면  
+첫 번째 이벤트 핸들러 코드를 다음과 같이 수정
+ChannelHandlerContext 인터페이스를 사용하여 채널 파이프라인에 이벤트를 발생
+
+```java
+package com.github.nettybook.ch4;
+
+import java.nio.charset.Charset;
+
+import io.netty.buffer.ByteBuf;
+import io.netty.channel.ChannelHandlerContext;
+import io.netty.channel.ChannelInboundHandlerAdapter;
+
+/**
+ * Handler implementation for the echo server.
+ */
+public class EchoServerV4FirstHandler extends ChannelInboundHandlerAdapter {
+   @Override
+   public void channelRead(ChannelHandlerContext ctx, Object msg) {
+      ByteBuf readMessage = (ByteBuf) msg;
+      System.out.println("FirstHandler channelRead : " + readMessage.toString(Charset.defaultCharset()));
+      ctx.write(msg);
+      ctx.fireChannelRead(msg); // fireChannelRead 메서드를 호출하면 채널 파이프라인에 channelRead 이벤트를 발생시킨다
+   }
+}
+```
+
+</details>
