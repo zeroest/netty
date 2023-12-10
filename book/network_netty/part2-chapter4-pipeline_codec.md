@@ -818,3 +818,274 @@ public class EchoServerV4FirstHandler extends ChannelInboundHandlerAdapter {
 ```
 
 </details>
+
+### 4.3.4 코덱
+
+인코더는 전송할 데이터를 전송 프로토콜에 맞추어 변환 작업을 수행  
+디코더는 반대 작업을 수행
+
+```mermaid
+flowchart LR
+
+SND_DT[송신 데이터]
+RCV_DT[수신 데이터]
+SC[소켓 채널]
+
+ICD[인코더\n데이터 변환 알고리즘]
+DCD[디코더\n데이터 변환 알고리즘]
+
+SND_DT --> DCD
+DCD --> SC
+SC --> ICD
+ICD --> RCV_DT
+
+    subgraph 인코딩
+        ICD
+    end
+
+    subgraph 디코딩
+        DCD
+    end
+```
+
+## 4.4 코덱의 구조
+
+데이터를 전송할 때는 인코더를 사용하여 패킷으로 변환하고  
+데이터를 수신할 때는 디코더를 사용하여 패킷을 데이터로 변환한다  
+
+### 4.4.1 코덱의 실행 과정
+
+네티의 코덱은 템플릿 메서드 패턴으로 구현되어 있다  
+상위 구현체에서 메서드의 실행 순서만을 지정하고 수행될 메서드의 구현은 하위 구현체로 위임
+
+<details>
+<summary>Base64Encoder 예제</summary>
+
+```java
+package io.netty.handler.codec.base64;
+
+import io.netty.buffer.ByteBuf;
+import io.netty.channel.ChannelHandler.Sharable;
+import io.netty.channel.ChannelHandlerContext;
+import io.netty.channel.ChannelPipeline;
+import io.netty.handler.codec.DelimiterBasedFrameDecoder;
+import io.netty.handler.codec.Delimiters;
+import io.netty.handler.codec.MessageToMessageEncoder;
+import io.netty.util.internal.ObjectUtil;
+
+import java.util.List;
+
+/**
+ * Encodes a {@link ByteBuf} into a Base64-encoded {@link ByteBuf}.
+ * A typical setup for TCP/IP would be:
+ * <pre>
+ * {@link ChannelPipeline} pipeline = ...;
+ *
+ * // Decoders
+ * pipeline.addLast("frameDecoder", new {@link DelimiterBasedFrameDecoder}(80, {@link Delimiters#nulDelimiter()}));
+ * pipeline.addLast("base64Decoder", new {@link Base64Decoder}());
+ *
+ * // Encoder
+ * pipeline.addLast("base64Encoder", new {@link Base64Encoder}());
+ * </pre>
+ */
+@Sharable
+public class Base64Encoder extends MessageToMessageEncoder<ByteBuf> {
+
+    private final boolean breakLines;
+    private final Base64Dialect dialect;
+
+    public Base64Encoder() {
+        this(true);
+    }
+
+    public Base64Encoder(boolean breakLines) {
+        this(breakLines, Base64Dialect.STANDARD);
+    }
+
+    public Base64Encoder(boolean breakLines, Base64Dialect dialect) {
+        this.dialect = ObjectUtil.checkNotNull(dialect, "dialect");
+        this.breakLines = breakLines;
+    }
+
+    @Override
+    protected void encode(ChannelHandlerContext ctx, ByteBuf msg, List<Object> out) throws Exception {
+        out.add(Base64.encode(msg, msg.readerIndex(), msg.readableBytes(), breakLines, dialect));
+    }
+}
+```
+
+```java
+package io.netty.handler.codec;
+
+import io.netty.channel.ChannelHandlerContext;
+import io.netty.channel.ChannelOutboundHandler;
+import io.netty.channel.ChannelOutboundHandlerAdapter;
+import io.netty.channel.ChannelPipeline;
+import io.netty.channel.ChannelPromise;
+import io.netty.util.ReferenceCountUtil;
+import io.netty.util.ReferenceCounted;
+import io.netty.util.concurrent.PromiseCombiner;
+import io.netty.util.internal.PlatformDependent;
+import io.netty.util.internal.StringUtil;
+import io.netty.util.internal.TypeParameterMatcher;
+
+import java.util.List;
+
+/**
+ * {@link ChannelOutboundHandlerAdapter} which encodes from one message to an other message
+ *
+ * For example here is an implementation which decodes an {@link Integer} to an {@link String}.
+ *
+ * <pre>
+ *     public class IntegerToStringEncoder extends
+ *             {@link MessageToMessageEncoder}&lt;{@link Integer}&gt; {
+ *
+ *         {@code @Override}
+ *         public void encode({@link ChannelHandlerContext} ctx, {@link Integer} message, List&lt;Object&gt; out)
+ *                 throws {@link Exception} {
+ *             out.add(message.toString());
+ *         }
+ *     }
+ * </pre>
+ *
+ * Be aware that you need to call {@link ReferenceCounted#retain()} on messages that are just passed through if they
+ * are of type {@link ReferenceCounted}. This is needed as the {@link MessageToMessageEncoder} will call
+ * {@link ReferenceCounted#release()} on encoded messages.
+ */
+public abstract class MessageToMessageEncoder<I> extends ChannelOutboundHandlerAdapter {
+
+    private final TypeParameterMatcher matcher;
+
+    /**
+     * Create a new instance which will try to detect the types to match out of the type parameter of the class.
+     */
+    protected MessageToMessageEncoder() {
+        matcher = TypeParameterMatcher.find(this, MessageToMessageEncoder.class, "I");
+    }
+
+    /**
+     * Create a new instance
+     *
+     * @param outboundMessageType   The type of messages to match and so encode
+     */
+    protected MessageToMessageEncoder(Class<? extends I> outboundMessageType) {
+        matcher = TypeParameterMatcher.get(outboundMessageType);
+    }
+
+    /**
+     * Returns {@code true} if the given message should be handled. If {@code false} it will be passed to the next
+     * {@link ChannelOutboundHandler} in the {@link ChannelPipeline}.
+     */
+    public boolean acceptOutboundMessage(Object msg) throws Exception {
+        return matcher.match(msg);
+    }
+
+    @Override
+    public void write(ChannelHandlerContext ctx, Object msg, ChannelPromise promise) throws Exception {
+        CodecOutputList out = null;
+        try {
+            if (acceptOutboundMessage(msg)) {
+                out = CodecOutputList.newInstance();
+                @SuppressWarnings("unchecked")
+                I cast = (I) msg;
+                try {
+                    encode(ctx, cast, out); // 추상 메서드 encode 호출
+                } catch (Throwable th) {
+                    ReferenceCountUtil.safeRelease(cast);
+                    PlatformDependent.throwException(th);
+                }
+                ReferenceCountUtil.release(cast);
+
+                if (out.isEmpty()) {
+                    throw new EncoderException(
+                            StringUtil.simpleClassName(this) + " must produce at least one message.");
+                }
+            } else {
+                ctx.write(msg, promise);
+            }
+        } catch (EncoderException e) {
+            throw e;
+        } catch (Throwable t) {
+            throw new EncoderException(t);
+        } finally {
+            if (out != null) {
+                try {
+                    final int sizeMinusOne = out.size() - 1;
+                    if (sizeMinusOne == 0) {
+                        ctx.write(out.getUnsafe(0), promise);
+                    } else if (sizeMinusOne > 0) {
+                        // Check if we can use a voidPromise for our extra writes to reduce GC-Pressure
+                        // See https://github.com/netty/netty/issues/2525
+                        if (promise == ctx.voidPromise()) {
+                            writeVoidPromise(ctx, out);
+                        } else {
+                            writePromiseCombiner(ctx, out, promise);
+                        }
+                    }
+                } finally {
+                    out.recycle();
+                }
+            }
+        }
+    }
+
+    private static void writeVoidPromise(ChannelHandlerContext ctx, CodecOutputList out) {
+        final ChannelPromise voidPromise = ctx.voidPromise();
+        for (int i = 0; i < out.size(); i++) {
+            ctx.write(out.getUnsafe(i), voidPromise);
+        }
+    }
+
+    private static void writePromiseCombiner(ChannelHandlerContext ctx, CodecOutputList out, ChannelPromise promise) {
+        final PromiseCombiner combiner = new PromiseCombiner(ctx.executor());
+        for (int i = 0; i < out.size(); i++) {
+            combiner.add(ctx.write(out.getUnsafe(i)));
+        }
+        combiner.finish(promise);
+    }
+
+    /**
+     * Encode from one message to an other. This method will be called for each written message that can be handled
+     * by this encoder.
+     *
+     * @param ctx           the {@link ChannelHandlerContext} which this {@link MessageToMessageEncoder} belongs to
+     * @param msg           the message to encode to an other one
+     * @param out           the {@link List} into which the encoded msg should be added
+     *                      needs to do some kind of aggregation
+     * @throws Exception    is thrown if an error occurs
+     */
+    protected abstract void encode(ChannelHandlerContext ctx, I msg, List<Object> out) throws Exception; // encode 추상 메서드 정의
+}
+```
+
+</details>
+
+## 4.5 기본 제공 코덱
+
+- io.netty.handler.codec - netty-codec 패키지에 기본 코덱 포함
+   - base64 코덱
+   - bytes 코덱 
+   - compression 코덱 
+   - marshalling 코덱 
+   - protobuf 코덱
+   - serialization 코덱
+   - string 코덱
+   - sctp 코덱
+
+- netty-codec-dns
+- netty-codec-haproxy
+- netty-codec-http
+   - http 코덱
+   - rtsp 코덱
+   - spdy 코덱
+- netty-codec-http2
+- netty-codec-memcache
+- netty-codec-mqtt
+- netty-codec-redis
+- netty-codec-smtp
+- netty-codec-socks
+- netty-codec-stomp
+- netty-codec-xml
+
+## 4.6 사용자 정의 코덱 
