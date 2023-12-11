@@ -1089,3 +1089,5 @@ public abstract class MessageToMessageEncoder<I> extends ChannelOutboundHandlerA
 - netty-codec-xml
 
 ## 4.6 사용자 정의 코덱 
+
+[HelloWorld 웹 서버](./part2-chapter4_6-custom-codec)
