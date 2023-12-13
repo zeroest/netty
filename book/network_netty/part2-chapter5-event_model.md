@@ -59,3 +59,117 @@
 > - Thread switching 때문에, 임계값을 넘어가면 CPU Utilization이 다시 감소한다.
 
 *[[bycho211] - Thread](https://m.blog.naver.com/bycho211/220994380643)*
+
+## 5.2 네티의 이벤트 루프
+
+네티는 이벤트 루프의 종류에 상관 없이 이벤트 발생 순서에 따른 실행 순서를 보장
+
+- 네티의 이벤트는 채널에서 발생한다
+- 이벤트 루프 객체는 이벤트 큐를 가지고 있다
+- 네티의 채널은 하나의 이벤트 루프에 등록된다
+
+![Netty event loop and channel structure](./img/netty-event_loop_channel_structure.png)
+*[Netty의 스레드 모델](https://effectivesquid.tistory.com/65)*
+
+네티의 각 채널은 개별 이벤트 루프 스레드에 등록된다  
+따라서 채널에서 발생한 이벤트는 항상 동일한 이벤트 루프 스레드에서 처리하여 이벤트 발생 순서와 처리 순서가 일치
+
+이벤트의 수행 순서가 일치하지 않는 이유는 이벤트 루프들이 이벤트 큐를 공유하여 발생  
+네티는 이벤트 큐를 이벤트 루프 스레드의 내부에 둠으로써 수행 순서 불일치의 원인을 제거
+
+네티는 이벤트를 처리하기 위하여 SingleThreadEventExecutor를 사용
+
+```java
+public abstract class SingleThreadEventExecutor extends AbstractScheduledEventExecutor implements OrderedEventExecutor {
+    
+  private final Queue<Runnable> taskQueue; // 발생된 이벤트를 저장할 이벤트 큐, 이벤트를 task 이름으로 선언하여 처리 
+
+  /**
+   * Create a new {@link Queue} which will holds the tasks to execute. This default implementation will return a
+   * {@link LinkedBlockingQueue} but if your sub-class of {@link SingleThreadEventExecutor} will not do any blocking
+   * calls on the this {@link Queue} it may make sense to {@code @Override} this and return some more performant
+   * implementation that does not support blocking operations at all.
+   */
+  protected Queue<Runnable> newTaskQueue(int maxPendingTasks) { // 이벤트 큐 구현체 LinkedBlockingQueue 사용
+    return new LinkedBlockingQueue<Runnable>(maxPendingTasks); // Runnable 객체 형태의 이벤트를 저장
+  }
+
+  /**
+   * @see Queue#poll()
+   */
+  protected Runnable pollTask() { // taskQueue에 입력된 이벤트 하나를 가져옴
+    assert inEventLoop();
+    return pollTaskFrom(taskQueue);
+  }
+
+  protected static Runnable pollTaskFrom(Queue<Runnable> taskQueue) {
+    for (;;) {
+      Runnable task = taskQueue.poll();
+      if (task != WAKEUP_TASK) {
+        return task;
+      }
+    }
+  }
+
+  /**
+   * Poll all tasks from the task queue and run them via {@link Runnable#run()} method.
+   *
+   * @return {@code true} if and only if at least one task was run
+   */
+  protected boolean runAllTasks() { //  이벤트 큐에 입력된 모든 이벤트를 수행
+    assert inEventLoop();
+    boolean fetchedAll;
+    boolean ranAtLeastOne = false;
+
+    do {
+      fetchedAll = fetchFromScheduledTaskQueue();
+      if (runAllTasksFrom(taskQueue)) {
+        ranAtLeastOne = true;
+      }
+    } while (!fetchedAll); // keep on processing until we fetched all scheduled tasks.
+
+    if (ranAtLeastOne) {
+      lastExecutionTime = getCurrentTimeNanos();
+    }
+    afterRunningAllTasks();
+    return ranAtLeastOne;
+  }
+
+  /**
+   * Runs all tasks from the passed {@code taskQueue}.
+   *
+   * @param taskQueue To poll and execute all tasks.
+   *
+   * @return {@code true} if at least one task was executed.
+   */
+  protected final boolean runAllTasksFrom(Queue<Runnable> taskQueue) {
+    Runnable task = pollTaskFrom(taskQueue);
+    if (task == null) {
+      return false;
+    }
+    for (;;) {
+      safeExecute(task);
+      task = pollTaskFrom(taskQueue);
+      if (task == null) {
+        return true;
+      }
+    }
+  }
+
+  /**
+   * Try to execute the given {@link Runnable} and just log if it throws a {@link Throwable}.
+   */
+  protected static void safeExecute(Runnable task) {
+    try {
+      runTask(task);
+    } catch (Throwable t) {
+      logger.warn("A task raised an exception. Task: {}", task, t);
+    }
+  }
+
+  protected static void runTask(@Execute Runnable task) {
+    task.run();
+  }
+  
+}
+```
