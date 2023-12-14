@@ -52,7 +52,7 @@
   - 스레드가 가진 스택 정보를 현재 코어의 레지스터로 복사하는 작업이 이루어지며 이것을 컨텍스트 스위칭이라 한다
 
 ![Optimum number of threads](./img/OptimumNumberOfThreads.png)
-*스레드 개수에 따른 전체 처리량*
+*스레드 개수에 따른 전체 처리량*  
 *[[baeldung] Servers threads number](https://www.baeldung.com/cs/servers-threads-number)*
 
 > Thread의 수가 증가할수록 CPU Utilization이 증가한다.
@@ -173,3 +173,140 @@ public abstract class SingleThreadEventExecutor extends AbstractScheduledEventEx
   
 }
 ```
+
+## 5.3 네티의 비동기 I/O 처리
+
+네티가 지원하는 퓨처 패턴의 구현체와 사용법
+
+퓨처 패턴 - 미래에 완료될 작업을 등록하고 처리 결과를 확인하는 객체를 통해서 작업의 완료를 확인하는 패턴
+
+어플리케이션 작업 완료 유무를 확인하려고 while 루프 작성시 코드의 복잡성 증가해 좋은 코드 패턴이 아니다
+
+```java
+package com.github.nettybook.ch5;
+
+import io.netty.bootstrap.ServerBootstrap;
+import io.netty.channel.ChannelFuture;
+import io.netty.channel.ChannelInitializer;
+import io.netty.channel.ChannelPipeline;
+import io.netty.channel.EventLoopGroup;
+import io.netty.channel.nio.NioEventLoopGroup;
+import io.netty.channel.socket.SocketChannel;
+import io.netty.channel.socket.nio.NioServerSocketChannel;
+import io.netty.util.concurrent.Future;
+
+public class EchoServer {
+    public static void main(String[] args) throws Exception {
+        EventLoopGroup bossGroup = new NioEventLoopGroup(1);
+        EventLoopGroup workerGroup = new NioEventLoopGroup();
+        try {
+            ServerBootstrap b = new ServerBootstrap();
+            b.group(bossGroup, workerGroup)
+             .channel(NioServerSocketChannel.class)
+             .childHandler(new ChannelInitializer<SocketChannel>() {
+                @Override
+                public void initChannel(SocketChannel ch) {
+                    ChannelPipeline p = ch.pipeline();
+                    p.addLast(new EchoServerHandler());
+                }
+            });
+
+            // ChannelFuture f = b.bind(8888).sync();
+            ChannelFuture bindFuture = b.bind(8888); // 서버가 8888 포트 사용하도록 바인드하는 비동기 bind 메서드 호출
+            bindFuture.sync(); // bind 메서드의 처리가 완료될 때 sync 메서드도 같이 완료된다
+          
+            // f.channel().closeFuture().sync();
+            Channel serverChannel = bindFuture.channel(); // bindFuture 객체를 통해 8888 포트 바인딩된 서버 채널을 얻어온다
+            ChannelFuture closeFuture = serverChannel.closeFuture(); // 채널이 생성될 때 CloseFuture 객체도 같이 생성됨
+            closeFuture.sync(); // closeFuture 객체는 채널의 연결이 종료될 때 연결 종료 이벤트를 받는다
+            // 채널이 생성될 때 같이 생성되는 기본 CloseFuture 객체에는 아무 동작도 설정되어 있지 않으므로 이벤트를 받았을 때 아무 동작도 하지 않는다
+        }
+        finally {
+            workerGroup.shutdownGracefully();
+            bossGroup.shutdownGracefully();
+        }
+    }
+}
+```
+
+ChannelFuture 객체에 작업이 완료되었을 때 수행할 채널 리스너를 설정할 수 있다
+
+```java
+package com.github.nettybook.ch5;
+
+import io.netty.channel.ChannelFuture;
+import io.netty.channel.ChannelFutureListener;
+import io.netty.channel.ChannelHandler.Sharable;
+import io.netty.channel.ChannelHandlerContext;
+import io.netty.channel.ChannelInboundHandlerAdapter;
+
+/**
+ * Handler implementation for the echo server.
+ */
+@Sharable
+public class EchoServerHandler extends ChannelInboundHandlerAdapter {
+    @Override
+    public void channelRead(ChannelHandlerContext ctx, Object msg) {
+        ChannelFuture channelFuture = ctx.writeAndFlush(msg);
+        channelFuture.addListener(ChannelFutureListener.CLOSE); // ChannelFuture 객체에 채널을 종료하는 리스너를 등록한다
+        // ChannelFutureListener.CLOSE 리스너는 네티가 제공하는 기본 리스너로써 ChannelFuture 객체가 완료 이벤트를 수신할 때 수행된다
+    }
+
+    @Override
+    public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) {
+        cause.printStackTrace();
+        ctx.close();
+    }
+}
+```
+
+연결된 클라이언트로부터 데이터를 수신하면 데이터를 돌려주고 데이터의 전송이 완료되면 연결된 소켓 채널을 닫는다
+
+네티 기본 채널 리스너 제공
+- ChannelFutureListener.CLOSE
+  - ChannelFuture 객체가 작업 완료 이벤트를 수신했을 때, ChannelFuture 객체에 포함된 채널을 닫는다
+  - 작업 성공 여부와 상관없이 수행된다
+- ChannelFutureListener.CLOSE_ON_FAILURE
+  - ChannelFuture 객체가 완료 이벤트를 수신하고 결과가 실패일 때, ChannelFuture 객체에 포함된 채널을 닫는다
+- ChannelFutureListener.FIRE_EXCEPTION_ON_FAILURE
+  - ChannelFuture 객체가 완료 이벤트를 수신하고 결과가 실패일 때, 채널 예외 이벤트를 발생시킨다
+
+```java
+package com.github.nettybook.ch5;
+
+import io.netty.buffer.ByteBuf;
+import io.netty.channel.ChannelFuture;
+import io.netty.channel.ChannelFutureListener;
+import io.netty.channel.ChannelHandler.Sharable;
+import io.netty.channel.ChannelHandlerContext;
+import io.netty.channel.ChannelInboundHandlerAdapter;
+
+/**
+ * Handler implementation for the echo server.
+ */
+@Sharable
+public class EchoServerHandlerWithFuture extends ChannelInboundHandlerAdapter {
+    @Override
+    public void channelRead(ChannelHandlerContext ctx, Object msg) {
+        ChannelFuture channelFuture = ctx.writeAndFlush(msg);
+
+        final int writeMessageSize = ((ByteBuf) msg).readableBytes(); // 
+
+        channelFuture.addListener(new ChannelFutureListener() { // 사용자 정의 채널 리스너를 생성하여 ChannelFuture 객체에 할당
+            @Override
+            public void operationComplete(ChannelFuture future) throws Exception { // operationComplete 메서드는 ChannelFuture 객체에서 발생하는 작업 완료 이벤트 메서드
+                System.out.println("전송한 Byte : " + writeMessageSize);
+                future.channel().close(); // ChannelFuture 객체에 포함된 채널을 가져와 채널 닫기 이벤트를 발생시킨다
+            }
+        });
+    }
+
+    @Override
+    public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) {
+        cause.printStackTrace();
+        ctx.close();
+    }
+}
+```
+
+ChannelFutureListener 인터페이스를 구현하여 사용자 정의 채널 리스너 사용
