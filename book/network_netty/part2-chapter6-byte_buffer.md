@@ -925,3 +925,52 @@ public class ConvertByteBufferTest {
     }
 }
 ```
+
+#### 채널과 바이트 버퍼 풀
+
+네티 내부에서 데이터 처리할 때 네티 바이트 버퍼 사용  
+channelRead 와 같이 이벤트 메서드 인수로 네티 바이트 버퍼를 사용하고  
+실행 이후 네티 바이트 버퍼는 바이트 버퍼 풀로 돌아간다  
+
+네티 바이트 버퍼 풀은 네티 어플리케이션의 서버 소켓 채널이 초기화될 때 같이 초기화  
+ChannelHandlerContext 인터페이스의 alloc 메서드로 생성된 바이트 버퍼 풀을 참조할 수 있다
+
+
+```java
+package com.github.nettybook.ch6;
+
+import io.netty.buffer.ByteBuf;
+import io.netty.buffer.ByteBufAllocator;
+import io.netty.channel.ChannelHandlerContext;
+import io.netty.channel.ChannelInboundHandlerAdapter;
+
+import java.nio.charset.Charset;
+
+/**
+ * Handler implementation for the echo server.
+ */
+public class EchoServerHandler extends ChannelInboundHandlerAdapter {
+    @Override
+    public void channelRead(ChannelHandlerContext ctx, Object msg) {
+        ByteBuf readMessage = (ByteBuf) msg;
+        System.out.println("channelRead : " + readMessage.toString(Charset.defaultCharset()));
+
+        ByteBufAllocator byteBufAllocator = ctx.alloc(); // ChannelHandlerContext 를 통해서 네티 프레임워크에서 초기화된 ByteBufAllocator를 참조할 수 있다
+        // ByteBufAllocator 는 바이트 버퍼 풀을 관리하는 인터페이스이며
+        // 플랫폼의 지원 여부에 따라 다이렉트 버퍼와 힙 버퍼 풀을 생성한다
+        // 기본적으로 다이렉트 버퍼 풀을 생성하며 어플리케이션 개발자의 필요에 따라 힙 버퍼 풀을 생성할 수도 있다
+        ByteBuf newBuffer = byteBufAllocator.buffer(); // buffer 메서드를 사용하여 생성된 바이트 버퍼는 ByteBufAllocator 풀에서 관리됨
+        // 바이트 버퍼를 채널에 기록하거나 명시적으로 release 메서드를 호출하면 바이트 버퍼 풀로 돌아간다
+        
+        // newBuffer 사용.
+
+        ctx.write(msg); // write 메서드의 인수로 바이트 버퍼가 입력되면 데이터를 채널에 기록하고 난 뒤에 버퍼 풀로 돌아간다
+    }
+
+    @Override
+    public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) {
+        cause.printStackTrace();
+        ctx.close();
+    }
+}
+```
