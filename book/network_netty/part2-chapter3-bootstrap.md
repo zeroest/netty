@@ -178,6 +178,7 @@ public class EchoServer {
     <a href="https://github.com/krisjey/netty.book.kor/blob/master/example/src/java/com/github/nettybook/ch3/EchoClient.java">Refer</a>
     
     </details>
+
 - option - 소켓 채널의 소켓 옵션 설정
     - @see io.netty.channel.ChannelOption
     - 서버와 연결된 클라이언트 소켓 채널의 옵션 설정
