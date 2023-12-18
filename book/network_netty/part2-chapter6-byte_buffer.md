@@ -425,7 +425,7 @@ java.nio.BufferUnderflowException
 
 네티 바이트 버퍼 풀 제공, 이를 통한 바이트 버퍼 재사용  
 바이트 버퍼 풀에 할당하려면 ByteBufAllocator 인터페이스 사용, 즉 ByteBufAllocator 하위 추상 구현체 PooledByteBufAllocator 클래스로 바이트 버퍼 생성  
-바이트 버퍼 생성시 인수 지정하지 않을 경우 기본값인 256 바이트 크기의 바이트 버퍼 생성  
+바이트 버퍼 생성시 인수 지정하지 않을 경우 기본값인 256 바이트 크기의 바이트 버퍼 생성
 
 <details>
 <summary>ByteBufAllocator</summary>
@@ -440,7 +440,7 @@ package io.netty.buffer;
 public interface ByteBufAllocator {
 
     ByteBufAllocator DEFAULT = ByteBufUtil.DEFAULT_ALLOCATOR;
-    
+
     // ...
 
 }
@@ -454,7 +454,7 @@ package io.netty.buffer;
  * such as the generation of hex dump and swapping an integer's byte order.
  */
 public final class ByteBufUtil {
-    
+
     // ...
 
     static final ByteBufAllocator DEFAULT_ALLOCATOR;
@@ -584,6 +584,7 @@ public final class UnpooledByteBufAllocator extends AbstractByteBufAllocator imp
 package com.github.nettybook.ch6;
 
 import static org.junit.Assert.assertEquals;
+
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.PooledByteBufAllocator;
 import io.netty.buffer.Unpooled;
@@ -639,6 +640,7 @@ public class CreateByteBufferByNettyTest {
 package com.github.nettybook.ch6;
 
 import static org.junit.Assert.assertEquals;
+
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.PooledByteBufAllocator;
 import io.netty.buffer.Unpooled;
@@ -679,7 +681,7 @@ public class ReadWriteByteBufferByNettyTest {
         assertEquals(11, buf.capacity());
 
         assertEquals(isDirect, buf.isDirect());
-        
+
         buf.writeInt(65537); // 4바이트 크기 정수 65537 기록, 데이터를 기록하는 write 메서드는 기록한 데이터 크기만큼 writeIndex 속성값을 증가
         assertEquals(4, buf.readableBytes()); // 4 바이트를 기록했으므로 읽을 수 있는 바이트 수는 4
         assertEquals(7, buf.writableBytes()); // 4 바이트를 기록했으므로 남은 바이트 수는 7
@@ -689,7 +691,7 @@ public class ReadWriteByteBufferByNettyTest {
         assertEquals(7, buf.writableBytes()); // 읽기 인덱스와 쓰기 인덱스를 별도로 관리하므로 읽기 인덱스가 변경된다고 해서 쓰기 인덱스가 변경되지 않는다
 
         assertEquals(true, buf.isReadable()); // 바이트 버퍼에 읽지 않은 데이터가 남았는지 확인, 쓰기 인덱스가 읽기 인덱스보다 큰지 검사
-      
+
         buf.clear(); // 바이트 버퍼를 초기화, 읽기 인덱스와 쓰기 인덱스 값을 모두 0으로 변경, 남은 데이터를 읽지 않고 버린다
 
         assertEquals(0, buf.readableBytes());
@@ -701,12 +703,13 @@ public class ReadWriteByteBufferByNettyTest {
 #### 가변 크기 버퍼
 
 네티 바이트 버퍼는 생성된 버퍼의 크기를 동적으로 변경할 수 있다  
-버퍼 크기를 변경해도 저장된 데이터는 보존된다  
+버퍼 크기를 변경해도 저장된 데이터는 보존된다
 
 ```java
 package com.github.nettybook.ch6;
 
 import static org.junit.Assert.*;
+
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.PooledByteBufAllocator;
 import io.netty.buffer.Unpooled;
@@ -747,7 +750,7 @@ public class DynamicByteBufferTest {
     private void testBuffer(ByteBuf buf, boolean isDirect) {
         assertEquals(11, buf.capacity());
         assertEquals(isDirect, buf.isDirect());
-        
+
         String sourceData = "hello world";
 
         buf.writeBytes(sourceData.getBytes()); // "hello world" 문자열 저장
@@ -768,6 +771,112 @@ public class DynamicByteBufferTest {
 
         assertEquals(13, buf.capacity());
         assertEquals(2, buf.writableBytes()); // 13 바이트 크기에 11 바이트를 기록하였으므로 남은 바이트 수 2
+    }
+}
+```
+
+#### 바이트 버퍼 풀링
+
+네티는 프레임워크에서 바이트 버퍼 풀을 제공  
+다이렉트 버퍼, 힙 버퍼 모두 풀링 가능
+
+버퍼를 빈번히 할당하고 해제 할 때 일어나는 GC 횟수의 감소  
+버퍼 풀링을 사용하여 GC 수행 횟수를 줄인다
+
+네티 바이트 버퍼 풀링은 ByteBufAllocator를 사용하여 바이트 버퍼를 생성 할 때 자동으로 수행
+
+네티는 바이트 버퍼를 풀링하기 위해서 바이트 버퍼에 참조 수를 기록한다  
+참조 수를 관리하기 위해 ReferenceCountUtil 클래스에 정의된 retain 메서드와 release 메서드를 사용  
+참조 수가 0일 때 release 호출시 IllegalReferenceCountException 발생
+
+#### 부호 없는 값 읽기
+
+자바는 C언어와 달리 부호 없는 데이터형이 없다
+
+자바에서 1바이트 데이터를 부호 없는 데이터로 변환하는 방법은 2바이트 데이터형에 데이터를 저장하는 것  
+부호 없는 데이터를 읽을 때는 읽을 데이터보다 큰 데이터형에 할당한다
+
+```java
+package com.github.nettybook.ch6;
+
+import static org.junit.Assert.*;
+
+import io.netty.buffer.ByteBuf;
+import io.netty.buffer.Unpooled;
+
+import org.junit.Test;
+
+public class UnsignedByteBufferTest {
+    @Test
+    public void unsignedBufferToJavaBuffer() {
+        ByteBuf buf = Unpooled.buffer(11);
+
+        buf.writeShort(-1);
+
+        assertEquals(65535, buf.getUnsignedShort(0));
+    }
+}
+```
+
+빈 바이트 버퍼에 음수 1 기록  
+-1은 부호 있는 16진수 표기법에서 0xFFFF -2는 0xFFFE로 표현  
+0xFFFF를 부호 없는 정수로 표현하면 65535  
+그러므로 getUnsignedShort 메서드로 바이트 버퍼에 저장된 데이터의 0번째 바이트 부터 2바이트를 읽어서 4바이트 데이터인 int로 읽어들이면 65535가 된다
+
+
+| 메서드               | 원본 데이터형 | 리턴 데이터형 |
+|-------------------|---------|---------|
+| getUnsignedByte   | byte    | short   |
+| getUnsignedShort  | short   | int     |
+| getUnsignedMedium | medium  | int     |
+| getUnsignedInt    | int     | long    |
+
+getUnsignedXXX 메서드를 제공  
+각 메서드 응답은 읽을 데이터형보다 한 단계 더 큰 데이터형
+
+#### 엔디안 변환
+
+Endian. Endianness의 줄임말
+
+reference
+- [https://ko.wikipedia.org/wiki/엔디언](https://ko.wikipedia.org/wiki/%EC%97%94%EB%94%94%EC%96%B8)
+- [https://tcpschool.com/c/c_refer_endian](https://tcpschool.com/c/c_refer_endian)
+
+네티의 바이트 버퍼의 기본 엔디안은 자바와 동일하게 빅엔디안  
+특별한 상황에서 리틀엔디안의 바이트 버퍼가 필요, 이때 바이트 버퍼의 order 메서드를 사용하여 엔디안을 변환  
+**네티 바이트 버퍼의 order 메서드는 새로운 바이트 버퍼를 생성하는 것이 아니라 주어진 바이트 버퍼의 내용을 공유하는 파생 바이트 버퍼 객체를 생성하므로 유의하여 사용**  
+
+```java
+package com.github.nettybook.ch6;
+
+import static org.junit.Assert.assertEquals;
+import io.netty.buffer.ByteBuf;
+import io.netty.buffer.PooledByteBufAllocator;
+import io.netty.buffer.Unpooled;
+
+import java.nio.ByteOrder;
+
+import org.junit.Test;
+
+public class OrderedByteBufferTest {
+    @Test
+    public void pooledHeapBufferTest() {
+        ByteBuf buf = Unpooled.buffer(11);
+        assertEquals(ByteOrder.BIG_ENDIAN, buf.order()); // 옵션 없이 생성한 네티 바이트 버퍼의 엔디안 확인
+
+        buf.writeShort(1); // 바이트 버퍼의 기본 엔디안이 빅엔디안이므로 0x0001 이 저장된다
+
+        buf.markReaderIndex(); // 현재 바이트 버퍼의 읽기 인덱스 위치를 표시
+        // markReaderIndex 로 표시한 읽기 인덱스로 돌아가려면 resetReaderIndex를 사용
+        assertEquals(1, buf.readShort()); // 저장한 데이터 1 확인, 빅엔디안으로 저장된 데이터를 그대로 읽는다
+
+        buf.resetReaderIndex(); // 읽기 인덱스의 위치를 markReaderIndex를 사용하여 표시한 위치로 이동
+
+        ByteBuf lettleEndianBuf = buf.order(ByteOrder.LITTLE_ENDIAN); // 바이트 버퍼 order 메서드로 리틀엔디안의 바이트 버퍼 생성
+        // 생성된 바이트 버퍼는 바이트 버퍼 내부의 배열과 읽기 인덱스, 쓰기 인덱스를 공유한다
+        // 즉 내용은 동일하지만 리틀엔디안에 해당하는 읽기 쓰기 메서드를 제공하는 바이트 버퍼 객체를 얻을 수 있다
+        assertEquals(256, lettleEndianBuf.readShort()); // 리틀엔디안에 해당하는 2바이트 Short형 데이터를 읽고 그 값이 256인지 확인  
+        // 빅엔디안인 0x0001을 리틀엔디안으로 변환하면 0x0100이 되므로 십진수 256이 된다
     }
 }
 ```
