@@ -880,3 +880,48 @@ public class OrderedByteBufferTest {
     }
 }
 ```
+
+#### 바이트 버퍼 상호 변환
+
+네티 바이트 버퍼는 nioBuffer 메서드를 사용하여 자바 NIO 버퍼로 변환 가능  
+변환된 NIO 바이트 버퍼는 네티 바이트 버퍼의 내부 바이트 배열을 공유한다
+
+```java
+package com.github.nettybook.ch6;
+
+import static org.junit.Assert.*;
+import io.netty.buffer.ByteBuf;
+import io.netty.buffer.Unpooled;
+
+import java.nio.ByteBuffer;
+import java.nio.charset.Charset;
+
+import org.junit.Test;
+
+public class ConvertByteBufferTest {
+    final String source = "Hello world";
+    
+    @Test
+    public void convertNettyBufferToJavaBuffer() {
+        ByteBuf buf = Unpooled.buffer(11);
+        
+        buf.writeBytes(source.getBytes());
+        assertEquals(source, buf.toString(Charset.defaultCharset()));
+
+        ByteBuffer nioByteBuffer = buf.nioBuffer();
+        assertNotNull(nioByteBuffer);
+        assertEquals(source, new String(nioByteBuffer.array()));
+        // assertEquals(source, new String(nioByteBuffer.array(), nioByteBuffer.arrayOffset(), nioByteBuffer.remaining()));
+    }
+
+    @Test
+    public void convertJavaBufferToNettyBuffer() {
+        ByteBuffer byteBuffer = ByteBuffer.wrap(source.getBytes());
+        ByteBuf nettyBuffer = Unpooled.wrappedBuffer(byteBuffer); // Unpooled 클래스의 wrappedBuffer 메서드에 자바 바이트 버퍼를 입력하여 네티 바이트 버퍼 생성
+        // 생성한 자바 바이트 버퍼와 네티 바이트 버퍼의 내부 배열은 서로 공유된다
+        // 이 같이 내부 배열을 공유하는 바이트 버퍼를 뷰 버퍼라고 한다
+
+        assertEquals(source, nettyBuffer.toString(Charset.defaultCharset()));
+    }
+}
+```
